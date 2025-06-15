@@ -1,4 +1,3 @@
-
 {
   "name": "FileDrop CDN (Vercel Backend)",
   "description": "A sleek, dark-themed file uploader using Vercel Serverless Functions, Vercel Blob for persistent storage, and server-side Gemini API for image descriptions.",

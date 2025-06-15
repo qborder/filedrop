@@ -6,7 +6,7 @@ import fs from 'fs';
 import { generateImageDescriptionFromAPI } from './_lib/geminiUtils';
 import { fileToBase64 } from './_lib/imageUtils'; // Using fileToBase64 for files read from disk
 import { addMetadataEntry } from './_lib/metadataUtils';
-import { UploadedFile } from '../../types'; // Path to types.ts from api directory
+import { UploadedFile } from '../types'; // Path to types.ts from api directory
 
 export const config = {
   api: {
@@ -60,29 +60,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       // Clean up the temporary file created by formidable
-      fs.unlinkSync(file.path);
+      // fs.unlinkSync(file.path); // Moved after potential use by Gemini
 
       let description = '';
       const isImage = fileType.startsWith('image/');
 
       if (isImage && process.env.API_KEY && process.env.API_KEY !== "YOUR_API_KEY_HERE") {
         try {
-          // Re-read the file for base64 conversion as stream was consumed by `put`
-          // OR: A more efficient way would be to pass the buffer to put and also use it for base64
-          // For now, let's re-read from the original temp path before unlinking it,
-          // which requires moving unlinkSync after Gemini call or duplicating read logic.
-          // Better: formidable can keep the file buffer if configured, or use the path.
-          // Since we use fs.createReadStream above, we need to read it again for base64 if not careful.
-          // Let's assume file.path is still valid here and read it for base64
-          // NOTE: This strategy means file.path must be read *before* unlinking.
-          // The current code unlinks *after* put. So if put consumes the stream from file.path,
-          // then fileToBase64 might fail.
-          // Safest: Use a buffer. Read file into buffer, pass buffer to put, pass buffer to base64.
-          
-          // Re-reading from temp file before unlink for Gemini (if it was unlinked too early)
-          // For this example, let's make sure file.path is read by fileToBase64 before unlinking.
-          // The unlink is now after this block.
-          const tempFileBuffer = fs.readFileSync(file.path); // Read into buffer
+          // Read file into buffer for Gemini and then unlink.
+          // This ensures the file is available for base64 conversion.
+          const tempFileBuffer = fs.readFileSync(file.path);
           const base64Data = tempFileBuffer.toString('base64');
           description = await generateImageDescriptionFromAPI(base64Data, fileType);
         } catch (geminiError: any) {
@@ -92,6 +79,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } else if (isImage) {
         description = "Description generation skipped: API key not configured on server.";
       }
+      
+      // Now that we're done with the file path (including for Gemini), unlink it.
+      fs.unlinkSync(file.path);
       
       const newFileEntry: UploadedFile = {
         id: blob.pathname, // Vercel Blob pathname is the ID
@@ -112,6 +102,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (error: any) {
     console.error('Upload error:', error);
     // Clean up any temp files if form parsing failed mid-way (formidable might do this)
+    // form.on('aborted' / 'error', cleanup);
     return res.status(500).json({ message: error.message || 'An internal server error occurred during upload.' });
   }
 }
